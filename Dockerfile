@@ -23,6 +23,9 @@ ENV CMAKE_BUILD_PARALLEL_LEVEL=8
 RUN apt-get update && apt-get install -y \
     python3.10 \
     python3.10-venv \
+    python3.10-dev \
+    build-essential \
+    g++ \
     git \
     wget \
     libgl1 \
@@ -31,9 +34,10 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libxrender1 \
     ffmpeg \
-    && ln -sf /usr/bin/python3.12 /usr/bin/python \
+    libsndfile1 \
+    && ln -sf /usr/bin/python3.10 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip
-
+    
 # Clean up to reduce image size
 RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 

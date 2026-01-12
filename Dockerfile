@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     && ln -sf /usr/bin/python3.10 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip
-    
+
 # Clean up to reduce image size
 RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
@@ -122,6 +122,10 @@ RUN uv pip install runpod requests websocket-client \
     # [NEW] ComfyUI-Manager Dependencies
     comfyui-workflow-templates \
     matrix-client
+
+# [CRITICAL FIX] Force-create the directory that ComfyUI Manager crashes on
+RUN mkdir -p /opt/venv/lib/python3.10/site-packages/comfyui_workflow_templates/templates
+RUN touch /opt/venv/lib/python3.10/site-packages/comfyui_workflow_templates/templates/.keep
     
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./

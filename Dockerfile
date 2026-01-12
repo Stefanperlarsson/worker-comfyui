@@ -108,7 +108,7 @@ RUN uv pip install runpod requests websocket-client \
     faker \
     pilgram \
     beautifulsoup4 \
-    pynvml \
+    nvidia-ml-py \
     psutil \
     
     # Face & Audio

@@ -85,6 +85,7 @@ RUN uv pip install runpod requests websocket-client \
     matplotlib \
     piexif \
     numexpr \
+    dill \
     
     # AI & Models
     ultralytics \
@@ -103,7 +104,7 @@ RUN uv pip install runpod requests websocket-client \
     sentencepiece \
     gguf \
     
-    # WAS Node Suite & Crystools (The new fixes)
+    # WAS Node Suite & Crystools
     faker \
     pilgram \
     beautifulsoup4 \

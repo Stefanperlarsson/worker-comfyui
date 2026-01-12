@@ -62,10 +62,10 @@ RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
     fi
 
 # Change working directory to ComfyUI
-# WORKDIR /comfyui
+WORKDIR /comfyui
 
 # Support for the network volume
-# ADD src/extra_model_paths.yaml ./
+ADD src/extra_model_paths.yaml ./
 
 # Go back to the root
 WORKDIR /

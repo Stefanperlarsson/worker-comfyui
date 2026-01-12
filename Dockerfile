@@ -111,13 +111,17 @@ RUN uv pip install runpod requests websocket-client \
     pynvml \
     psutil \
     
-    # Face & Audio (PuLID / FantasyTalking)
+    # Face & Audio
     insightface \
     facexlib \
     pydub \
     edge-tts \
     librosa \
-    soundfile
+    soundfile \
+    
+    # [NEW] ComfyUI-Manager Dependencies
+    comfyui-workflow-templates \
+    matrix-client
     
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./

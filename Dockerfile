@@ -72,6 +72,7 @@ WORKDIR /
 
 # Install Python runtime dependencies for the handler
 RUN uv pip install runpod requests websocket-client \
+    # Image & Core
     opencv-python-headless \
     scipy \
     imageio \
@@ -79,19 +80,40 @@ RUN uv pip install runpod requests websocket-client \
     pandas \
     matplotlib \
     piexif \
+    numexpr \
+    
+    # AI & Models
     ultralytics \
     segment-anything \
     scikit-learn \
     einops \
     transformers \
     onnxruntime-gpu \
+    accelerate \
+    kornia \
+    spandrel \
+    
+    # GGUF / LLM / Tokenizers
     tiktoken \
     simpleeval \
     sentencepiece \
     gguf \
-    accelerate \
-    numexpr
-
+    
+    # WAS Node Suite & Crystools (The new fixes)
+    faker \
+    pilgram \
+    beautifulsoup4 \
+    pynvml \
+    psutil \
+    
+    # Face & Audio (PuLID / FantasyTalking)
+    insightface \
+    facexlib \
+    pydub \
+    edge-tts \
+    librosa \
+    soundfile
+    
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./
 RUN chmod +x /start.sh

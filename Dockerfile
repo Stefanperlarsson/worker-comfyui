@@ -71,7 +71,13 @@ ADD src/extra_model_paths.yaml ./
 WORKDIR /
 
 # Install Python runtime dependencies for the handler
-RUN uv pip install runpod requests websocket-client
+RUN uv pip install runpod requests websocket-client \
+    opencv-python-headless \
+    scipy \
+    imageio \
+    scikit-image \
+    pandas \
+    matplotlib \
 
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./

@@ -77,8 +77,15 @@ RUN uv pip install runpod requests websocket-client \
     imageio \
     scikit-image \
     pandas \
-    matplotlib
-
+    matplotlib \
+    piexif \
+    ultralytics \
+    segment-anything \
+    scikit-learn \
+    einops \
+    transformers \
+    onnxruntime-gpu
+    
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./
 RUN chmod +x /start.sh

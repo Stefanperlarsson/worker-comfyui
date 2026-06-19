@@ -51,9 +51,25 @@ COMFY_HOST = "127.0.0.1:8188"
 # see https://docs.runpod.io/docs/handler-additional-controls#refresh-worker
 REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "false").lower() == "true"
 
+# Root of the ComfyUI install on the network volume — output/ and temp/ live under here.
+COMFY_ROOT = "/runpod-volume/runpod-slim/ComfyUI"
+
 # ---------------------------------------------------------------------------
 # Helper: quick reachability probe of ComfyUI HTTP endpoint (port 8188)
 # ---------------------------------------------------------------------------
+
+
+def delete_comfy_file(filename, subfolder, file_type):
+    """Remove a generated file from ComfyUI's disk once we've grabbed its bytes."""
+    subdir = "temp" if file_type == "temp" else "output"
+    path = os.path.join(COMFY_ROOT, subdir, subfolder or "", filename)
+    try:
+        os.remove(path)
+        print(f"worker-comfyui - Deleted {path} after retrieval")
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        print(f"worker-comfyui - Could not delete {path}: {e}")
 
 
 def _comfy_server_status():
@@ -806,6 +822,8 @@ def handler(job):
                                 error_msg = f"Error encoding {filename} to base64: {e}"
                                 print(f"worker-comfyui - {error_msg}")
                                 errors.append(error_msg)
+
+                        delete_comfy_file(filename, subfolder, img_type)
                     else:
                         error_msg = f"Failed to fetch image data for {filename} from /view endpoint."
                         errors.append(error_msg)
@@ -894,6 +912,8 @@ def handler(job):
                                 error_msg = f"Error encoding {filename} to base64: {e}"
                                 print(f"worker-comfyui - {error_msg}")
                                 errors.append(error_msg)
+
+                        delete_comfy_file(filename, subfolder, vid_type)
                     else:
                         error_msg = f"Failed to fetch video data for {filename} from /view endpoint."
                         errors.append(error_msg)

@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Time to wait between API check attempts in milliseconds
-COMFY_API_AVAILABLE_INTERVAL_MS = 100
+COMFY_API_AVAILABLE_INTERVAL_MS = 250
 # Maximum number of API check attempts
 COMFY_API_AVAILABLE_MAX_RETRIES = 1800
 # Websocket reconnection behaviour (can be overridden through environment variables)

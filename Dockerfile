@@ -127,8 +127,12 @@ RUN uv pip install runpod requests websocket-client \
     matrix-client
 
 # Upgrade PyTorch AFTER all other deps so nothing can overwrite it
+# Don't pin torch to a single version: torchvision/torchaudio hard-require an
+# exact matching torch, so pinning torch alone (with the others unpinned) yields
+# an unresolvable conflict whenever a newer torchvision is published. Let the
+# three resolve together as a matched set from the cu128 index.
 RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
-      uv pip install --force-reinstall torch==2.12.0 torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
+      uv pip install --force-reinstall torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
     fi
 
 # Bake ComfyUI's runtime deps into /opt/venv at BUILD time so cold starts don't

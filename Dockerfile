@@ -145,6 +145,9 @@ RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 # Set the default command to run when starting the container
 CMD ["/start.sh"]
 
+# Debug: print PyTorch CUDA version at build time
+RUN python -c "import torch; print('TORCH VERSION:', torch.__version__); print('TORCH CUDA:', torch.version.cuda)"
+
 # Stage 2: Download models
 FROM base AS downloader
 

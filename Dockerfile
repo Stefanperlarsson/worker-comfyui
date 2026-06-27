@@ -60,11 +60,6 @@ RUN if [ -n "${CUDA_VERSION_FOR_COMFY}" ]; then \
       /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia; \
     fi
 
-# Upgrade PyTorch if needed (for newer CUDA versions)
-RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
-      uv pip install --force-reinstall torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
-    fi
-
 # Change working directory to ComfyUI
 WORKDIR /comfyui
 
@@ -86,7 +81,7 @@ RUN uv pip install runpod requests websocket-client \
     piexif \
     numexpr \
     dill \
-    
+    \
     # AI & Models
     ultralytics \
     segment-anything \
@@ -97,20 +92,20 @@ RUN uv pip install runpod requests websocket-client \
     accelerate \
     kornia \
     spandrel \
-    
+    \
     # GGUF / LLM / Tokenizers
     tiktoken \
     simpleeval \
     sentencepiece \
     gguf \
-    
+    \
     # WAS Node Suite & Crystools
     faker \
     pilgram \
     beautifulsoup4 \
     nvidia-ml-py \
     psutil \
-    
+    \
     # Face & Audio
     insightface \
     facexlib \
@@ -118,10 +113,15 @@ RUN uv pip install runpod requests websocket-client \
     edge-tts \
     librosa \
     soundfile \
-    
+    \
     # [NEW] ComfyUI-Manager Dependencies
     comfyui-workflow-templates \
     matrix-client
+
+# Upgrade PyTorch AFTER all other deps so nothing can overwrite it
+RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
+      uv pip install --force-reinstall torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
+    fi
 
 # [CRITICAL FIX] Force-create the directory that ComfyUI Manager crashes on
 RUN mkdir -p /opt/venv/lib/python3.10/site-packages/comfyui_workflow_templates/templates
@@ -142,11 +142,11 @@ ENV PIP_NO_INPUT=1
 COPY scripts/comfy-manager-set-mode.sh /usr/local/bin/comfy-manager-set-mode
 RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 
-# Set the default command to run when starting the container
-CMD ["/start.sh"]
-
 # Debug: print PyTorch CUDA version at build time
 RUN python -c "import torch; print('TORCH VERSION:', torch.__version__); print('TORCH CUDA:', torch.version.cuda)"
+
+# Set the default command to run when starting the container
+CMD ["/start.sh"]
 
 # Stage 2: Download models
 FROM base AS downloader

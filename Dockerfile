@@ -120,7 +120,7 @@ RUN uv pip install runpod requests websocket-client \
 
 # Upgrade PyTorch AFTER all other deps so nothing can overwrite it
 RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
-      uv pip install --force-reinstall torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
+      uv pip install --force-reinstall torch==2.12.0 torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
     fi
 
 # [CRITICAL FIX] Force-create the directory that ComfyUI Manager crashes on

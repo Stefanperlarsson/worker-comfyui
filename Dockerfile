@@ -7,8 +7,14 @@ FROM ${BASE_IMAGE} AS base
 # Build arguments for this stage with sensible defaults for standalone builds
 ARG COMFYUI_VERSION=latest
 ARG CUDA_VERSION_FOR_COMFY
-ARG ENABLE_PYTORCH_UPGRADE=false
-ARG PYTORCH_INDEX_URL
+# Default to force-installing a CUDA 12.x PyTorch build. comfy-cli ignores
+# --cuda-version inside Docker (no GPU to detect) and installs a cu130 wheel,
+# which RunPod's 12.4 host driver rejects ("driver too old"). RunPod's Hub
+# builds this Dockerfile with default ARGs (no build args), so the default
+# must be correct here, not only in docker-bake.hcl. cu126 runs on a 12.4
+# driver via CUDA minor-version compatibility.
+ARG ENABLE_PYTORCH_UPGRADE=true
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu126
 
 # Prevents prompts from packages asking for user input during installation
 ENV DEBIAN_FRONTEND=noninteractive

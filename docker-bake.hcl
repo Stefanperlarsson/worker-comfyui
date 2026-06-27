@@ -23,16 +23,17 @@ variable "CUDA_VERSION_FOR_COMFY" {
   default = "12.4"
 }
 
-# Force a CUDA 12.x PyTorch build. comfy-cli's --cuda-version is ignored inside
-# Docker (no GPU to detect) and falls back to a cu130 wheel, which RunPod's
-# 12.4 host driver rejects ("driver too old"). cu126 runs fine on a 12.4 driver
-# via CUDA minor-version compatibility.
+# Force-install a CUDA 12.8 (cu128) PyTorch build. comfy-cli's --cuda-version is
+# ignored inside Docker (no GPU to detect). cu128 is the first build with sm_120
+# kernels for Blackwell GPUs (RTX 5090); it needs a host driver supporting CUDA
+# 12.8 (R570+). cu126 lacks sm_120; cu130 needs a CUDA 13 driver older hosts
+# reject as "driver too old".
 variable "ENABLE_PYTORCH_UPGRADE" {
   default = "true"
 }
 
 variable "PYTORCH_INDEX_URL" {
-  default = "https://download.pytorch.org/whl/cu126"
+  default = "https://download.pytorch.org/whl/cu128"
 }
 
 variable "HUGGINGFACE_ACCESS_TOKEN" {
@@ -168,8 +169,9 @@ target "base-cuda12-8-1" {
     COMFYUI_VERSION = "${COMFYUI_VERSION}"
     CUDA_VERSION_FOR_COMFY = ""
     ENABLE_PYTORCH_UPGRADE = "true"
-    PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu126"
+    PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
     MODEL_TYPE = "base"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-base-cuda12.8.1"]
 }
+

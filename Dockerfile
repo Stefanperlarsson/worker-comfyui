@@ -153,6 +153,13 @@ RUN grep -ivE '^[[:space:]]*(torch|torchvision|torchaudio)([[:space:]=<>!~;].*)?
 RUN uv pip install timm iopath hydra-core fal-client torchdiffeq blend_modes \
     "transformers>=4.50.3,<5" "huggingface-hub<1.0"
 
+# Quantized-tensor kernels. The volume's ComfyUI requires comfy-kitchen; the
+# mirror step above only sees the IMAGE's (older) requirements.txt, so it is
+# missed and every quantized checkpoint dies at load with "'NoneType' object
+# has no attribute 'Params'" — get_layout_class() returning None from
+# quant_ops.py's ImportError fallback. Version matches ComfyUI's own pin.
+RUN uv pip install "comfy-kitchen==0.2.26"
+
 # [CRITICAL FIX] Force-create the directory that ComfyUI Manager crashes on
 RUN mkdir -p /opt/venv/lib/python3.10/site-packages/comfyui_workflow_templates/templates
 RUN touch /opt/venv/lib/python3.10/site-packages/comfyui_workflow_templates/templates/.keep

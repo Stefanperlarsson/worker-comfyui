@@ -539,6 +539,105 @@ def get_video_data(filename, subfolder, video_type):
         return None
 
 
+# --------------------------------------------------------------------------
+# Media cleanup
+#
+# ComfyUI writes every render into its own output directory and never removes
+# it. On a serverless worker backed by a network volume that directory
+# persists between jobs, so without this the volume steadily fills with media
+# that has already been delivered and will never be read again. The same goes
+# for images uploaded into its input directory and for the history record.
+#
+# Deletion happens only once the bytes are secured -- encoded into the
+# response, or confirmed uploaded to S3 -- never on the way past. Deleting at
+# fetch time instead would destroy the only copy whenever an encode or an
+# upload subsequently failed.
+# --------------------------------------------------------------------------
+
+COMFY_DIR_CANDIDATES = ("/runpod-volume/runpod-slim/ComfyUI", "/comfyui")
+KEEP_OUTPUT = os.environ.get("COMFY_KEEP_OUTPUT", "false").lower() == "true"
+
+
+def _comfy_dir(kind):
+    """Absolute path to ComfyUI's output/input/temp directory, or None.
+
+    COMFY_BASE_DIR overrides. Otherwise the network-volume install is
+    preferred over the one baked into the image, because that is the one the
+    worker actually runs from -- and the one that runs out of space.
+    """
+    base = os.environ.get("COMFY_BASE_DIR")
+    for b in ([base] if base else list(COMFY_DIR_CANDIDATES)):
+        if not b:
+            continue
+        path = os.path.join(b, kind)
+        if os.path.isdir(path):
+            return path
+    return None
+
+
+def _delete_within(root, subfolder, filename):
+    """Delete root/subfolder/filename, refusing anything that escapes root.
+
+    The names come from ComfyUI's own history rather than from job input, but
+    this is a delete path, so it verifies containment instead of trusting it.
+    """
+    if not root or not filename:
+        return False
+    root_real = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(root, subfolder or "", filename))
+    if os.path.commonpath([root_real, target]) != root_real:
+        print(f"worker-comfyui - Refusing to delete outside {root_real}: {target}")
+        return False
+    try:
+        os.remove(target)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as e:
+        print(f"worker-comfyui - Could not delete {target}: {e}")
+        return False
+
+
+def cleanup_delivered(delivered):
+    """Remove files whose bytes are already in the response payload."""
+    if KEEP_OUTPUT or not delivered:
+        return 0
+    removed = 0
+    for filename, subfolder, kind in delivered:
+        if _delete_within(_comfy_dir(kind or "output"), subfolder, filename):
+            removed += 1
+    if removed:
+        print(f"worker-comfyui - Deleted {removed} delivered file(s) from disk")
+    return removed
+
+
+def cleanup_inputs(input_images):
+    """Remove images this job uploaded into ComfyUI's input directory."""
+    if KEEP_OUTPUT or not input_images:
+        return 0
+    root = _comfy_dir("input")
+    removed = sum(
+        1 for img in input_images
+        if isinstance(img, dict) and _delete_within(root, "", img.get("name"))
+    )
+    if removed:
+        print(f"worker-comfyui - Deleted {removed} uploaded input(s) from disk")
+    return removed
+
+
+def clear_history(prompt_id):
+    """Drop this prompt from ComfyUI's in-memory history so it stops growing."""
+    if KEEP_OUTPUT or not prompt_id:
+        return
+    try:
+        requests.post(
+            f"http://{COMFY_HOST}/history", json={"delete": [prompt_id]}, timeout=10
+        )
+        print(f"worker-comfyui - Cleared history for prompt {prompt_id}")
+    except requests.RequestException as e:
+        print(f"worker-comfyui - Could not clear history for {prompt_id}: {e}")
+
+
 def handler(job):
     """
     Handles a job using ComfyUI via websockets for status and image retrieval.
@@ -592,6 +691,9 @@ def handler(job):
     prompt_id = None
     output_data = []
     output_data_videos = []
+    # (filename, subfolder, type) for each file whose bytes are safely in
+    # the response -- deleted from disk once the payload is assembled.
+    delivered = []
     errors = []
 
     try:
@@ -773,6 +875,7 @@ def handler(job):
                                         "data": s3_url,
                                     }
                                 )
+                                delivered.append((filename, subfolder, img_type))
                             except Exception as e:
                                 error_msg = f"Error uploading {filename} to S3: {e}"
                                 print(f"worker-comfyui - {error_msg}")
@@ -800,6 +903,7 @@ def handler(job):
                                         "data": base64_image,
                                     }
                                 )
+                                delivered.append((filename, subfolder, img_type))
                                 print(f"worker-comfyui - Encoded {filename} as base64")
                             except Exception as e:
                                 error_msg = f"Error encoding {filename} to base64: {e}"
@@ -862,6 +966,7 @@ def handler(job):
                                         "data": s3_url,
                                     }
                                 )
+                                delivered.append((filename, subfolder, video_type))
                             except Exception as e:
                                 error_msg = f"Error uploading {filename} to S3: {e}"
                                 print(f"worker-comfyui - {error_msg}")
@@ -889,6 +994,7 @@ def handler(job):
                                         "data": base64_video,
                                     }
                                 )
+                                delivered.append((filename, subfolder, video_type))
                                 print(f"worker-comfyui - Encoded {filename} as base64")
                             except Exception as e:
                                 error_msg = f"Error encoding {filename} to base64: {e}"
@@ -930,6 +1036,17 @@ def handler(job):
         if ws and ws.connected:
             print(f"worker-comfyui - Closing websocket connection.")
             ws.close()
+
+    # Every delivered file's bytes are now held in output_data /
+    # output_data_videos, so the copies ComfyUI left on disk are dead weight.
+    # Wrapped because freeing space must never be able to fail a job that has
+    # already succeeded -- a full volume is a smaller problem than a lost render.
+    try:
+        cleanup_delivered(delivered)
+        cleanup_inputs(input_images)
+        clear_history(prompt_id)
+    except Exception as cleanup_err:
+        print(f"worker-comfyui - Media cleanup failed (non-fatal): {cleanup_err}")
 
     final_result = {}
 

@@ -217,14 +217,24 @@ CMD ["/start.sh"]
 FROM base AS sageattention-builder
 
 ARG SAGEATTENTION_REF=v2.2.0
-# 8.9 = Ada (RTX 4090), 12.0 = Blackwell (RTX 5090, RTX PRO 4500/4000/6000).
-# Every extra arch costs real build time, so do not add archs we do not run on —
-# but do NOT drop 8.9 while any Ada card is still in the endpoint's GPU list, or
-# those workers get an import error instead of a speedup.
-# NOTE: SageAttention's setup.py hard-fails if nvcc is older than 12.8 while
-# 12.0 is in this list, so the toolkit below is pinned explicitly rather than
-# inherited from whatever the base image ships.
-ARG SAGE_CUDA_ARCH_LIST="8.9 12.0"
+# 8.9 = Ada (RTX 4090), 12.0 = Blackwell (RTX 5090, RTX PRO Blackwell).
+#
+# THE `+PTX` IS LOAD-BEARING. DO NOT REMOVE IT. (2026-08-11, after a live
+# failure.) setup.py only emits the PTX fallback gencode line for an arch that
+# carries a `+PTX` suffix; without it you get `-gencode arch=compute_X,code=sm_X`
+# and nothing else, so the wheel runs on EXACTLY the listed archs and hard-fails
+# everywhere else with:
+#     CUDA error: no kernel image is available for execution on the device
+# raised from SamplerCustomAdvanced, mid-render, after the job has already paid
+# for queue and model load. Because a serverless endpoint schedules across a
+# whole GPU pool, that presents as an INTERMITTENT failure that depends on which
+# card you land on -- some renders succeed, some die. The PTX blob lets the
+# driver JIT for any newer architecture (sm_121 and up) instead of dying.
+#
+# Do not drop 8.9 while any Ada card is in the endpoint's GPU list.
+# NOTE: setup.py hard-fails if nvcc is older than 12.8 while 12.0 is listed, so
+# the toolkit below is pinned rather than inherited from the base image.
+ARG SAGE_CUDA_ARCH_LIST="8.9 12.0+PTX"
 # Kept deliberately modest: nvcc is memory-hungry and a CI builder that OOMs
 # halfway through wastes the entire compile. Raise on a big machine.
 ARG SAGE_MAX_JOBS=4

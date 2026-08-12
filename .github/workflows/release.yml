@@ -1,10 +1,12 @@
 name: release
 
+# Push trigger removed 2026-08-12: this workflow targets the blacksmith-*
+# runner label inherited from upstream, whose app was never installed on this
+# fork — every push parked a phantom run in the queue forever. It also pushes
+# to Docker Hub with secrets this fork does not have. Kept for reference,
+# manual trigger only. The real builders are the RunPod Hub and build-ghcr.yml.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - "main"
 
 jobs:
   release:

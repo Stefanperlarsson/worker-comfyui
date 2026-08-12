@@ -30,9 +30,13 @@ permissions:
 
 jobs:
   build:
-    # Same runner pool release.yml already uses. Ubuntu 22.04 => system
-    # python3.10, matching the python3.10 the image's /opt/venv runs on.
-    runs-on: [blacksmith-8vcpu-ubuntu-2204, linux]
+    # GitHub-hosted, NOT the blacksmith-* label the other workflows name: that
+    # label comes from the upstream repo's CI vendor, whose app was never
+    # installed on this fork — jobs with it queue forever (observed 2026-08-12;
+    # this repo has never had a Blacksmith run complete). ubuntu-22.04 gives
+    # system python3.10, matching the image's /opt/venv, and public repos get
+    # free minutes with a 6-hour job cap — the compile can take what it takes.
+    runs-on: ubuntu-22.04
     steps:
       - name: Install CUDA toolkit 12.8
         run: |
@@ -55,7 +59,7 @@ jobs:
           # here ("no kernel image is available for execution on the device",
           # observed live 2026-08-11). 8.9 = Ada (4090), 12.0 = Blackwell.
           TORCH_CUDA_ARCH_LIST: "8.9 12.0+PTX"
-          MAX_JOBS: "6"
+          MAX_JOBS: "4"
           EXT_PARALLEL: "2"
           NVCC_APPEND_FLAGS: "--threads 8"
           CUDA_HOME: /usr/local/cuda-12.8

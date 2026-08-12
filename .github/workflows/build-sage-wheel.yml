@@ -1,0 +1,79 @@
+# Compiles the SageAttention wheel ONCE on CI and attaches it to a fixed GitHub
+# release, so the RunPod Hub image build can download it in seconds instead of
+# compiling for 30+ minutes and hitting the Hub's build timeout.
+#
+# Trigger: manual only (Actions tab -> build-sage-wheel -> Run workflow).
+# Re-run it whenever the wheel must change: torch major/minor bump in the image,
+# CUDA family change (cu128 -> something else), new SageAttention version, or a
+# change to the arch list. The release tag and filename are FIXED so the
+# Dockerfile URL never changes; re-runs overwrite the asset (--clobber).
+#
+# ABI coupling, read before touching: the wheel is a torch C++/CUDA extension.
+# This job installs torch UNPINNED from the same cu128 index the Dockerfile
+# uses, so wheel and image resolve the same torch as long as they are built
+# around the same time. If a new torch lands in between, the image's non-fatal
+# import check ("SAGEATTENTION: import OK") fails with an undefined-symbol
+# error in the Hub build log -- the fix is: re-run this workflow, then rebuild.
+name: build-sage-wheel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Same runner pool release.yml already uses. Ubuntu 22.04 => system
+    # python3.10, matching the python3.10 the image's /opt/venv runs on.
+    runs-on: [blacksmith-8vcpu-ubuntu-2204, linux]
+    steps:
+      - name: Install CUDA toolkit 12.8
+        run: |
+          wget -qO /tmp/cuda-keyring.deb \
+            https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i /tmp/cuda-keyring.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cuda-toolkit-12-8
+
+      - name: Install torch (same resolve as the image, cu128, python3.10)
+        run: |
+          python3.10 -m pip install --upgrade pip setuptools wheel
+          python3.10 -m pip install torch --index-url https://download.pytorch.org/whl/cu128
+          python3.10 -c "import torch; print('building against torch', torch.__version__)"
+
+      - name: Build SageAttention wheel
+        env:
+          # Mirrors the (removed) Dockerfile builder stage. The +PTX is
+          # load-bearing: without it the wheel hard-fails on any arch not named
+          # here ("no kernel image is available for execution on the device",
+          # observed live 2026-08-11). 8.9 = Ada (4090), 12.0 = Blackwell.
+          TORCH_CUDA_ARCH_LIST: "8.9 12.0+PTX"
+          MAX_JOBS: "6"
+          EXT_PARALLEL: "2"
+          NVCC_APPEND_FLAGS: "--threads 8"
+          CUDA_HOME: /usr/local/cuda-12.8
+        run: |
+          export PATH="$CUDA_HOME/bin:$PATH"
+          git clone --depth 1 --branch v2.2.0 https://github.com/thu-ml/SageAttention.git
+          cd SageAttention
+          python3.10 setup.py bdist_wheel
+          ls -lh dist/
+          # Canonical filename so the Dockerfile URL is stable across rebuilds.
+          mkdir -p /tmp/wheelout
+          cp dist/*.whl /tmp/wheelout/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl
+          ls -lh /tmp/wheelout/
+
+      - name: Attach wheel to the fixed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create sage-wheel-v2.2.0 \
+            -R "${{ github.repository }}" \
+            --title "SageAttention 2.2.0 wheel (cu128, sm89+sm120+PTX)" \
+            --notes "CI-built wheel consumed by the Dockerfile. Re-run the build-sage-wheel workflow to refresh it; the asset is overwritten in place." \
+            || true
+          gh release upload sage-wheel-v2.2.0 \
+            -R "${{ github.repository }}" \
+            --clobber \
+            /tmp/wheelout/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl

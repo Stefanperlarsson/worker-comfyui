@@ -18,6 +18,12 @@ name: build-sage-wheel
 
 on:
   workflow_dispatch:
+  # Pushing anything to the build-wheel branch also fires it, so the wheel can
+  # be rebuilt from a terminal (git push origin main:build-wheel) without
+  # hunting for the Run-workflow button in the Actions UI.
+  push:
+    branches:
+      - build-wheel
 
 permissions:
   contents: write

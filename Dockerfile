@@ -168,12 +168,31 @@ RUN uv pip install timm iopath hydra-core fal-client torchdiffeq blend_modes \
     color-matcher mss \
     "transformers>=4.50.3,<5" "huggingface-hub<1.0"
 
-# Quantized-tensor kernels. The volume's ComfyUI requires comfy-kitchen; the
-# mirror step above only sees the IMAGE's (older) requirements.txt, so it is
-# missed and every quantized checkpoint dies at load with "'NoneType' object
-# has no attribute 'Params'" — get_layout_class() returning None from
-# quant_ops.py's ImportError fallback. Version matches ComfyUI's own pin.
-RUN uv pip install "comfy-kitchen==0.2.26"
+# ComfyUI's own first-party runtime packages.
+#
+# THIS BLOCK IS A RECURRING FAILURE POINT — read before touching. The mirror
+# step above installs the IMAGE's /comfyui/requirements.txt, but the ComfyUI
+# that actually RUNS lives on the network volume and moves independently. Every
+# time the volume's ComfyUI gains a new first-party dependency, this image is
+# behind and the worker dies. It has now happened twice:
+#   comfy-kitchen  — missing: every quantized checkpoint died at load with
+#                    "'NoneType' object has no attribute 'Params'" (get_layout_class()
+#                    returning None from quant_ops.py's ImportError fallback).
+#   comfy-aimdo    — missing (2026-08-12): ComfyUI would not BOOT at all.
+#                    comfy/memory_management.py line 7 does `import
+#                    comfy_aimdo.host_buffer`, so main.py raised ModuleNotFoundError
+#                    and the handler then failed 600 connection attempts to :8188.
+#                    Every job on the endpoint failed, not just some.
+#
+# Versions must track https://github.com/comfyanonymous/ComfyUI/blob/master/requirements.txt
+# — NOT the image's copy, which is what misled us both times. When a worker dies
+# on a missing/mismatched comfy-* module, diff that file against this block first.
+#
+# NOTE the ordering trap: this RUN comes AFTER the requirements mirror, so an
+# EXACT pin here DOWNGRADES whatever the mirror resolved. The old
+# comfy-kitchen==0.2.26 pin was actively pulling the image backwards from the
+# 0.2.30 that ComfyUI now requires.
+RUN uv pip install "comfy-kitchen==0.2.30" "comfy-aimdo==0.4.13" comfy-angle
 
 # [CRITICAL FIX] Force-create the directory that ComfyUI Manager crashes on
 RUN mkdir -p /opt/venv/lib/python3.10/site-packages/comfyui_workflow_templates/templates

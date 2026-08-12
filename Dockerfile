@@ -219,73 +219,6 @@ RUN python -c "import torch; print('TORCH VERSION:', torch.__version__); print('
 # Set the default command to run when starting the container
 CMD ["/start.sh"]
 
-# Stage 1b: Compile SageAttention
-#
-# Why a separate stage: `base` is a CUDA *runtime* image and has no nvcc, and
-# SageAttention has no usable Linux wheel on PyPI — `pip install sageattention`
-# builds from source. Building it here, in a stage that is thrown away, keeps
-# the ~3GB CUDA toolkit out of the shipped image; only the finished wheel is
-# copied into `final`.
-#
-# Why FROM base: the wheel is a torch C++/CUDA extension and is ABI-tied to the
-# exact torch build it was compiled against. Deriving from `base` means it is
-# compiled against the very same /opt/venv torch that will import it at runtime.
-# A standalone builder stage would have to re-resolve torch and could silently
-# drift (torch is deliberately unpinned above), producing a wheel that imports
-# and then segfaults.
-FROM base AS sageattention-builder
-
-ARG SAGEATTENTION_REF=v2.2.0
-# 8.9 = Ada (RTX 4090), 12.0 = Blackwell (RTX 5090, RTX PRO Blackwell).
-#
-# THE `+PTX` IS LOAD-BEARING. DO NOT REMOVE IT. (2026-08-11, after a live
-# failure.) setup.py only emits the PTX fallback gencode line for an arch that
-# carries a `+PTX` suffix; without it you get `-gencode arch=compute_X,code=sm_X`
-# and nothing else, so the wheel runs on EXACTLY the listed archs and hard-fails
-# everywhere else with:
-#     CUDA error: no kernel image is available for execution on the device
-# raised from SamplerCustomAdvanced, mid-render, after the job has already paid
-# for queue and model load. Because a serverless endpoint schedules across a
-# whole GPU pool, that presents as an INTERMITTENT failure that depends on which
-# card you land on -- some renders succeed, some die. The PTX blob lets the
-# driver JIT for any newer architecture (sm_121 and up) instead of dying.
-#
-# Do not drop 8.9 while any Ada card is in the endpoint's GPU list.
-# NOTE: setup.py hard-fails if nvcc is older than 12.8 while 12.0 is listed, so
-# the toolkit below is pinned rather than inherited from the base image.
-ARG SAGE_CUDA_ARCH_LIST="8.9 12.0+PTX"
-# Kept deliberately modest: nvcc is memory-hungry and a CI builder that OOMs
-# halfway through wastes the entire compile. Raise on a big machine.
-ARG SAGE_MAX_JOBS=4
-ARG SAGE_EXT_PARALLEL=2
-ARG SAGE_NVCC_THREADS=4
-
-RUN wget -qO /tmp/cuda-keyring.deb \
-      https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
-    && dpkg -i /tmp/cuda-keyring.deb \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends cuda-toolkit-12-8 \
-    && rm -rf /var/lib/apt/lists/* /tmp/cuda-keyring.deb
-
-# Must match the CUDA the torch in /opt/venv was built against (cu128), or the
-# extension compiles and then fails to load.
-ENV CUDA_HOME=/usr/local/cuda-12.8
-ENV PATH="${CUDA_HOME}/bin:${PATH}"
-
-# setup.py reads TORCH_CUDA_ARCH_LIST and skips GPU autodetection entirely when
-# it is set — that is what makes this compilable on a builder with no GPU.
-RUN git clone --depth 1 --branch "${SAGEATTENTION_REF}" \
-      https://github.com/thu-ml/SageAttention.git /tmp/sageattention \
-    && cd /tmp/sageattention \
-    && TORCH_CUDA_ARCH_LIST="${SAGE_CUDA_ARCH_LIST}" \
-       MAX_JOBS="${SAGE_MAX_JOBS}" \
-       EXT_PARALLEL="${SAGE_EXT_PARALLEL}" \
-       NVCC_APPEND_FLAGS="--threads ${SAGE_NVCC_THREADS}" \
-       python setup.py bdist_wheel \
-    && mkdir -p /wheels \
-    && cp dist/*.whl /wheels/ \
-    && ls -lh /wheels/
-
 # Stage 2: Download models
 FROM base AS downloader
 
@@ -299,16 +232,24 @@ WORKDIR /runpod-volume/runpod-slim/ComfyUI/
 # Stage 3: Final image
 FROM base AS final
 
-# SageAttention, compiled in stage 1b. This is the stage RunPod builds when no
-# --target is given (it is the last one in the file), so this is where the wheel
-# has to land. If you ever build `base` directly, it will NOT have SageAttention.
+# SageAttention — DOWNLOADED, not compiled. Compiling it here took 30+ minutes
+# and blew the RunPod Hub build timeout, so the compile moved to CI: the
+# build-sage-wheel workflow (manual trigger, .github/workflows/) builds the
+# wheel once on the Blacksmith runner for sm_89 + sm_120 + PTX against the same
+# unpinned cu128 torch this image installs, and pins it to the fixed release
+# URL below. Re-run that workflow (then rebuild this image) whenever torch,
+# CUDA family, the arch list, or the SageAttention version changes.
 #
-# The import check is deliberately non-fatal: the builder has no GPU, and some
-# sageattention versions probe CUDA at import time. A failure here means "could
-# not verify", not "broken" — read the build log rather than trusting silence.
-COPY --from=sageattention-builder /wheels /tmp/wheels
-RUN uv pip install /tmp/wheels/*.whl \
-    && rm -rf /tmp/wheels \
+# This is the stage RunPod builds when no --target is given (last in the file),
+# so this is where the wheel has to land. If you ever build `base` directly, it
+# will NOT have SageAttention.
+#
+# The import check is deliberately non-fatal for the no-GPU build machine case,
+# BUT an "undefined symbol" here means the wheel was built against a different
+# torch than this image just resolved — that wheel will not work at runtime.
+# Fix: re-run build-sage-wheel, then rebuild this image.
+ARG SAGE_WHEEL_URL=https://github.com/Stefanperlarsson/worker-comfyui/releases/download/sage-wheel-v2.2.0/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl
+RUN uv pip install "${SAGE_WHEEL_URL}" \
     && (python -c "import sageattention; print('SAGEATTENTION: import OK')" \
         || echo "SAGEATTENTION: installed, import unverified (no GPU at build time)")
 

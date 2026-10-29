@@ -192,7 +192,15 @@ RUN uv pip install timm iopath hydra-core fal-client torchdiffeq blend_modes \
 # EXACT pin here DOWNGRADES whatever the mirror resolved. The old
 # comfy-kitchen==0.2.26 pin was actively pulling the image backwards from the
 # 0.2.30 that ComfyUI now requires.
-RUN uv pip install "comfy-kitchen==0.2.30" "comfy-aimdo==0.4.13" comfy-angle
+#
+# Bumped 2026-10-29 for the volume's ComfyUI v0.43.1 (MOSS-Image support): its
+# requirements.txt pins comfy-aimdo 0.6.0, comfy-kitchen 0.2.40 and the three
+# frontend/template/docs packages below, and adds av>=17, blake3 and
+# pydantic-settings. On the old pins a fresh worker never got ComfyUI up.
+RUN uv pip install "comfy-kitchen==0.2.40" "comfy-aimdo==0.6.0" comfy-angle \
+    "comfyui-frontend-package==1.57.4" "comfyui-workflow-templates==0.11.98" \
+    "comfyui-embedded-docs==0.5.15" "av>=17.0.0" blake3 "pydantic-settings~=2.0" \
+    "simpleeval>=1.0.0"
 
 # [CRITICAL FIX] Force-create the directory that ComfyUI Manager crashes on
 RUN mkdir -p /opt/venv/lib/python3.10/site-packages/comfyui_workflow_templates/templates

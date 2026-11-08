@@ -637,6 +637,24 @@ def clear_history(prompt_id):
         print(f"worker-comfyui - Could not clear history for {prompt_id}: {e}")
 
 
+def _unique_save_prefixes(workflow, job_id):
+    """Give every save node a per-job filename_prefix.
+
+    A resubmitted identical graph (same prompt + seed) is a full cache hit in
+    ComfyUI: no node re-executes, and history points at the previous job's
+    output file -- which cleanup_delivered() already deleted, so the job failed
+    with "Failed to fetch image data ... from /view". A fresh prefix makes only
+    the save node re-run (it re-saves the cached image in milliseconds); the
+    sampler and the loaded models stay cached, which is the point of a warm
+    worker.
+    """
+    tag = str(job_id).split("-")[0][:8]
+    for node in workflow.values():
+        inputs = node.get("inputs") if isinstance(node, dict) else None
+        if isinstance(inputs, dict) and isinstance(inputs.get("filename_prefix"), str):
+            inputs["filename_prefix"] = f"{inputs['filename_prefix']}_{tag}"
+
+
 def handler(job):
     """
     Handles a job using ComfyUI via websockets for status and image retrieval.
@@ -664,6 +682,7 @@ def handler(job):
     # Extract validated data
     workflow = validated_data["workflow"]
     input_images = validated_data.get("images")
+    _unique_save_prefixes(workflow, job_id)
 
     # Make sure that the ComfyUI HTTP API is available before proceeding
     if not check_server(

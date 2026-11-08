@@ -31,7 +31,6 @@ DATA_CENTERS = ["EUR-IS-1", "EUR-IS-2", "EUR-IS-3", "EUR-NO-1", "EU-SE-1", "EU-N
                 "EU-RO-1", "EU-CZ-1", "EU-FR-1"]
 
 ENDPOINT = {
-    "dataCenterIds": DATA_CENTERS,
     "gpuCount": 1,
     "gpuTypeIds": GPUS,
     "minCudaVersion": "12.8",
@@ -57,6 +56,24 @@ def call(method, path, body=None):
     if r.status_code >= 400:
         sys.exit(f"{method} {path}: HTTP {r.status_code} {r.text[:500]}")
     return r.json() if r.text else {}
+
+
+def set_locations(eid, name, tid, timeout_ms):
+    """Pin the endpoint to DATA_CENTERS. REST PATCH accepts dataCenterIds but does not
+    apply it (2026-11-08: version bumps, locations stay null), so this goes through
+    GraphQL saveEndpoint, which needs the full endpoint input or it resets fields."""
+    q = ('mutation { saveEndpoint(input:{id:"%s", name:"%s", templateId:"%s", '
+         'gpuIds:"ADA_24,ADA_32_PRO", gpuCount:1, workersMin:%d, workersMax:%d, idleTimeout:%d, '
+         'scalerType:"%s", scalerValue:%d, networkVolumeId:"", locations:"%s", '
+         'executionTimeoutMs:%d}) { id locations } }') % (
+        eid, name, tid, ENDPOINT["workersMin"], ENDPOINT["workersMax"], ENDPOINT["idleTimeout"],
+        ENDPOINT["scalerType"], ENDPOINT["scalerValue"], ",".join(DATA_CENTERS), timeout_ms)
+    r = requests.post("https://api.runpod.io/graphql", json={"query": q}, timeout=60,
+                      headers={"Authorization": f"Bearer {os.environ['RUNPOD_API_KEY']}"})
+    data = r.json()
+    if r.status_code >= 400 or data.get("errors"):
+        sys.exit(f"saveEndpoint {name}: {r.status_code} {json.dumps(data)[:500]}")
+    return data["data"]["saveEndpoint"]["locations"]
 
 
 def main():
@@ -88,7 +105,8 @@ def main():
             call("PATCH", f"/endpoints/{eid}", ep)
         else:
             eid = call("POST", "/endpoints", ep)["id"]
-        print(fam, eid, tpl["imageName"])
+        locs = set_locations(eid, name, tid, ep["executionTimeoutMs"])
+        print(fam, eid, tpl["imageName"], locs)
 
 
 if __name__ == "__main__":

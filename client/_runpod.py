@@ -228,7 +228,7 @@ def start_collector(endpoint_id, api_key, job_id, save_to, timeout, poll_interva
     env = dict(os.environ, RUNPOD_API_KEY=api_key)
     with open(log_path, "a") as log:
         subprocess.Popen(
-            [sys.executable, os.path.abspath(__file__), "collect", endpoint_id, job_id, save_to,
+            [sys.executable, "-u", os.path.abspath(__file__), "collect", endpoint_id, job_id, save_to,
              str(timeout), str(poll_interval), str(queue_timeout)],
             stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
             env=env, start_new_session=True, close_fds=True)

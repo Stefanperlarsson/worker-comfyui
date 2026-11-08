@@ -9,7 +9,11 @@ of being staged to the old volume, which the new endpoints cannot see.
 RUNPOD_ENDPOINT_ID (the old volume endpoint) is left alone -- retired scripts
 still read it until that endpoint is deleted. Without --apply it only prints the
 plan. Each file is backed up beside itself as <name>.bak-serverless-split first.
+
+--keep-staging leaves INPUT_S3_BUCKET on: used to point every family at the old
+volume endpoint (which still needs staged refs) until the new ones are verified.
 """
+import os
 import shutil
 import sys
 
@@ -27,7 +31,7 @@ ENV_FILES = {
 }
 
 
-def plan(path, families, ids):
+def plan(path, families, ids, keep_staging=False):
     lines = open(path).read().splitlines()
     want = {f"RUNPOD_ENDPOINT_{f.upper()}": ids[f] for f in families}
     out, seen, changes = [], set(), []
@@ -39,7 +43,7 @@ def plan(path, families, ids):
             if line != new:
                 changes.append(f"set {key}")
             out.append(new)
-        elif key == "INPUT_S3_BUCKET":
+        elif key == "INPUT_S3_BUCKET" and not keep_staging:
             out.append("# " + line + "  # off since the 2026-11-08 serverless split: refs go base64")
             changes.append("comment out INPUT_S3_BUCKET")
         else:
@@ -61,10 +65,12 @@ def main():
         need = [f for f in families if f not in ids]
         if need:
             sys.exit(f"missing ids for {need}")
-        text, changes = plan(path, families, ids)
+        text, changes = plan(path, families, ids, keep_staging="--keep-staging" in sys.argv)
         print(f"{path}: {', '.join(changes) or 'no change'}")
         if apply and changes:
-            shutil.copy2(path, path + ".bak-serverless-split")
+            bak = path + ".bak-serverless-split"
+            if not os.path.exists(bak):  # keep the first, pre-split backup
+                shutil.copy2(path, bak)
             with open(path, "w") as f:
                 f.write(text)
 

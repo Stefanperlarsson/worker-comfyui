@@ -20,6 +20,7 @@ TARGETS=(
   /home/stefan/studio/skills/world/chroma_inpaint/scripts/_runpod.py
   /home/stefan/studio/skills/world/long_video/scripts/_runpod.py
   /home/stefan/hermes_assistant/.hermes/camera-kit/world/send_nsfw_image/scripts/_runpod.py
+  /home/stefan/hermes_assistant/.hermes/camera-kit/world/send_video/scripts/_runpod.py
 )
 
 rc=0

@@ -24,7 +24,14 @@ FAMILIES = ("moss", "flux", "chroma", "h3")
 # 24 GB cards; 4090 (Ada) and 5090 (Blackwell) are both covered by the cu128 torch.
 GPUS = ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 5090"]
 
+# Europe only (Stefan, 2026-11-08: no US, nothing Five Eyes). Iceland, Norway, Sweden,
+# Netherlands, Romania, Czechia, France. Capacity is thinner than worldwide: Romania
+# carries most of the 4090/5090 stock, the rest is low or none at any moment.
+DATA_CENTERS = ["EUR-IS-1", "EUR-IS-2", "EUR-IS-3", "EUR-NO-1", "EU-SE-1", "EU-NL-1",
+                "EU-RO-1", "EU-CZ-1", "EU-FR-1"]
+
 ENDPOINT = {
+    "dataCenterIds": DATA_CENTERS,
     "gpuCount": 1,
     "gpuTypeIds": GPUS,
     "minCudaVersion": "12.8",

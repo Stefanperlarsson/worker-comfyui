@@ -1,0 +1,4 @@
+diffusion_models/chroma_v10HD.safetensors
+clip/t5xxl_fp8_e4m3fn_scaled.safetensors
+vae/ae.safetensors
+checkpoints/sam3.1_multiplex_fp16.safetensors

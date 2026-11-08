@@ -1,41 +1,36 @@
-# Build argument for base image selection
+# worker-comfyui — one Dockerfile, one image per model family.
+#
+#   docker build --build-arg FAMILY=h3 .      (moss | flux | chroma | h3)
+#
+# This builds the family's CODE image: CUDA, Python, a pinned ComfyUI, the family's
+# custom nodes, the handler. No weights. The weights are appended afterwards as
+# prebuilt layers (tools/imgtool, .github/workflows/build-family.yml), so a code
+# rebuild never re-downloads or re-uploads 40 GB of models. Nothing is read from a
+# network volume any more: ComfyUI, nodes and models all live in the image.
+
 ARG BASE_IMAGE=nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
-# Stage 1: Base image with common dependencies
 FROM ${BASE_IMAGE} AS base
 
-# Build arguments for this stage with sensible defaults for standalone builds
-ARG COMFYUI_VERSION=latest
-ARG CUDA_VERSION_FOR_COMFY
-# Force-install a PyTorch build with kernels for the target GPU. comfy-cli
-# ignores --cuda-version inside Docker (no GPU to detect), so we pin it here.
-# RunPod's Hub builds this Dockerfile with default ARGs (no build args), so the
-# default must be correct here, not only in docker-bake.hcl.
-#   cu128 = CUDA 12.8 build, the first with sm_120 kernels for Blackwell GPUs
-#   (RTX 5090). Needs a host driver supporting CUDA 12.8 (R570+) — 50-series
-#   hosts have it. cu126 lacks sm_120; cu130 needs a CUDA 13 / R580+ driver that
-#   older hosts reject as "driver too old".
-#
-# cu130 was evaluated 2026-08-11 and REJECTED, deliberately — record it here so
-# nobody re-derives it. The upside was real (ComfyUI #15419: the int8 path emits
-# noise on CUDA < 13.0; NVFP4 text encoders want a CUDA 13 torch; async offload
-# + pinned memory land there). The blocker is that the endpoint keeps the 24GB
-# ADA_24 pool — i.e. the RTX 4090 — and cu130 needs an R580+ host driver that
-# Ada hosts may not have. A worker that cannot start is worse than a slow one.
-# Revisit only if the 4090 pool is ever dropped for an all-Blackwell endpoint.
-ARG ENABLE_PYTORCH_UPGRADE=true
+ARG FAMILY
+# ComfyUI is pinned, never "latest": an unpinned rebuild pulling a newer core is
+# what broke the worker twice (see git history). v0.43.1 is the release the old
+# volume ran, the first known-good one for MOSS-Image. Bump deliberately.
+ARG COMFYUI_REF=v0.43.1
+# PyTorch from the cu128 index: the first build with sm_120 kernels (RTX 5090) that
+# still runs on R570 Ada (4090) hosts. cu130 needs R580+ and was rejected 2026-08-11.
+# Pinned to the exact set the old image resolved, which the SageAttention wheel
+# below was built against — a different torch makes that wheel fail to load.
 ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
+ARG TORCH_PINS="torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0"
 
-# Prevents prompts from packages asking for user input during installation
 ENV DEBIAN_FRONTEND=noninteractive
-# Prefer binary wheels over source distributions for faster pip installations
 ENV PIP_PREFER_BINARY=1
-# Ensures output from python is printed immediately to the terminal without buffering
 ENV PYTHONUNBUFFERED=1
-# Speed up some cmake builds
 ENV CMAKE_BUILD_PARALLEL_LEVEL=8
 
-# Install Python, git and other necessary tools
+RUN test -n "${FAMILY}" || (echo "FAMILY build arg is required (moss|flux|chroma|h3)" >&2; exit 1)
+
 RUN apt-get update && apt-get install -y \
     python3.10 \
     python3.10-venv \
@@ -52,214 +47,67 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
     && ln -sf /usr/bin/python3.10 /usr/bin/python \
-    && ln -sf /usr/bin/pip3 /usr/bin/pip
+    && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
-# Clean up to reduce image size
-RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
-
-# Install uv (latest) using official installer and create isolated venv
 RUN wget -qO- https://astral.sh/uv/install.sh | sh \
     && ln -s /root/.local/bin/uv /usr/local/bin/uv \
     && ln -s /root/.local/bin/uvx /usr/local/bin/uvx \
     && uv venv /opt/venv
 
-# Use the virtual environment for all subsequent commands
 ENV PATH="/opt/venv/bin:${PATH}"
 
-# Install comfy-cli + dependencies needed by it to install ComfyUI
-RUN uv pip install comfy-cli pip setuptools wheel
+RUN uv pip install pip setuptools wheel
 
-# Install ComfyUI
-RUN if [ -n "${CUDA_VERSION_FOR_COMFY}" ]; then \
-      /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --cuda-version "${CUDA_VERSION_FOR_COMFY}" --nvidia; \
-    else \
-      /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia; \
-    fi
+# PyTorch first, from its own index; everything after resolves against it.
+RUN uv pip install ${TORCH_PINS} --index-url ${PYTORCH_INDEX_URL}
 
-# Change working directory to ComfyUI
-WORKDIR /comfyui
+# ComfyUI at the pinned tag. Its requirements.txt is now the one that actually runs,
+# so ComfyUI's first-party packages (comfy-kitchen, comfy-aimdo, frontend...) come
+# from it at the right versions — no hand-maintained pin block to fall behind.
+RUN git clone https://github.com/Comfy-Org/ComfyUI /comfyui \
+    && cd /comfyui && git checkout --detach "${COMFYUI_REF}" \
+    && grep -ivE '^[[:space:]]*(torch|torchvision|torchaudio)([[:space:]=<>!~;].*)?$' requirements.txt > /tmp/comfy-reqs.txt \
+    && uv pip install -r /tmp/comfy-reqs.txt \
+    && rm -rf .git
 
-# Support for the network volume
-ADD src/extra_model_paths.yaml ./
-
-# Go back to the root
-WORKDIR /
-
-# Install Python runtime dependencies for the handler
+# Handler deps, plus the transformers / huggingface-hub ceiling from upstream #227
+# (transformers 5.x / huggingface-hub 1.x break ComfyUI at startup).
 RUN uv pip install runpod requests websocket-client \
-    # Image & Core
-    opencv-python-headless \
-    scipy \
-    imageio \
-    scikit-image \
-    pandas \
-    matplotlib \
-    piexif \
-    numexpr \
-    dill \
-    \
-    # AI & Models
-    ultralytics \
-    segment-anything \
-    scikit-learn \
-    einops \
-    transformers \
-    onnxruntime-gpu \
-    accelerate \
-    kornia \
-    spandrel \
-    \
-    # GGUF / LLM / Tokenizers
-    tiktoken \
-    simpleeval \
-    sentencepiece \
-    gguf \
-    \
-    # WAS Node Suite & Crystools
-    faker \
-    pilgram \
-    beautifulsoup4 \
-    nvidia-ml-py \
-    psutil \
-    \
-    # Face & Audio
-    insightface \
-    facexlib \
-    pydub \
-    edge-tts \
-    librosa \
-    soundfile \
-    \
-    # [NEW] ComfyUI-Manager Dependencies
-    comfyui-workflow-templates \
-    matrix-client
-
-# Upgrade PyTorch AFTER all other deps so nothing can overwrite it
-# Don't pin torch to a single version: torchvision/torchaudio hard-require an
-# exact matching torch, so pinning torch alone (with the others unpinned) yields
-# an unresolvable conflict whenever a newer torchvision is published. Let the
-# three resolve together as a matched set from the cu128 index.
-RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
-      uv pip install --force-reinstall torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
-    fi
-
-# Bake ComfyUI's runtime deps into /opt/venv at BUILD time so cold starts don't
-# reinstall them. comfy-cli installs ComfyUI into /comfyui/.venv, but start.sh
-# launches ComfyUI (from the network volume) with /opt/venv's python — so mirror
-# ComfyUI's core requirements into /opt/venv. Covers alembic / SQLAlchemy
-# (ComfyUI's sqlite DB) and the rest of core deps. torch is stripped so the
-# cu128 build installed above is preserved.
-RUN grep -ivE '^[[:space:]]*(torch|torchvision|torchaudio)([[:space:]=<>!~;].*)?$' /comfyui/requirements.txt > /tmp/comfy-reqs.txt \
-    && uv pip install -r /tmp/comfy-reqs.txt
-
-# Custom-node deps the volume's ComfyUI imports that aren't covered above (keeps
-# PuLID / RMBG / face-parsing / fill-nodes / mmaudio etc. loading), plus the
-# transformers/huggingface-hub pin from upstream #227 (transformers 5.x /
-# huggingface-hub 1.x break ComfyUI at startup). Heavy compiled deps
-# (llama-cpp-python, groundingdino) are still intentionally omitted — add them
-# here only if a workflow needs those specific nodes. sageattention is NO LONGER
-# omitted: it is compiled in its own stage below and installed into `final`.
-#
-# color-matcher and mss are ComfyUI-KJNodes' two requirements that nothing else
-# here pulls in. They are pure-Python and tiny, and without them KJNodes fails to
-# import — which would take `PathchSageAttentionKJ` down with it, i.e. the node
-# that actually switches SageAttention on. Keep them.
-RUN uv pip install timm iopath hydra-core fal-client torchdiffeq blend_modes \
-    color-matcher mss \
+    opencv-python-headless scipy einops kornia spandrel \
     "transformers>=4.50.3,<5" "huggingface-hub<1.0"
 
-# ComfyUI's own first-party runtime packages.
-#
-# THIS BLOCK IS A RECURRING FAILURE POINT — read before touching. The mirror
-# step above installs the IMAGE's /comfyui/requirements.txt, but the ComfyUI
-# that actually RUNS lives on the network volume and moves independently. Every
-# time the volume's ComfyUI gains a new first-party dependency, this image is
-# behind and the worker dies. It has now happened twice:
-#   comfy-kitchen  — missing: every quantized checkpoint died at load with
-#                    "'NoneType' object has no attribute 'Params'" (get_layout_class()
-#                    returning None from quant_ops.py's ImportError fallback).
-#   comfy-aimdo    — missing (2026-08-12): ComfyUI would not BOOT at all.
-#                    comfy/memory_management.py line 7 does `import
-#                    comfy_aimdo.host_buffer`, so main.py raised ModuleNotFoundError
-#                    and the handler then failed 600 connection attempts to :8188.
-#                    Every job on the endpoint failed, not just some.
-#
-# Versions must track https://github.com/comfyanonymous/ComfyUI/blob/master/requirements.txt
-# — NOT the image's copy, which is what misled us both times. When a worker dies
-# on a missing/mismatched comfy-* module, diff that file against this block first.
-#
-# NOTE the ordering trap: this RUN comes AFTER the requirements mirror, so an
-# EXACT pin here DOWNGRADES whatever the mirror resolved. The old
-# comfy-kitchen==0.2.26 pin was actively pulling the image backwards from the
-# 0.2.30 that ComfyUI now requires.
-#
-# Bumped 2026-10-29 for the volume's ComfyUI v0.43.1 (MOSS-Image support): its
-# requirements.txt pins comfy-aimdo 0.6.0, comfy-kitchen 0.2.40 and the three
-# frontend/template/docs packages below, and adds av>=17, blake3 and
-# pydantic-settings. On the old pins a fresh worker never got ComfyUI up.
-RUN uv pip install "comfy-kitchen==0.2.40" "comfy-aimdo==0.6.0" comfy-angle \
-    "comfyui-frontend-package==1.57.4" "comfyui-workflow-templates==0.11.98" \
-    "comfyui-embedded-docs==0.5.15" "av>=17.0.0" blake3 "pydantic-settings~=2.0" \
-    "simpleeval>=1.0.0"
+# The family's custom nodes, pinned by commit, then its patches on top.
+COPY families/${FAMILY} /family
+RUN set -e; cd /comfyui/custom_nodes; \
+    while read -r url ref; do \
+      [ -z "${url}" ] && continue; \
+      dir="$(basename "${url}" .git)"; \
+      git clone "${url}" "${dir}"; \
+      git -C "${dir}" checkout --detach "${ref}"; \
+      rm -rf "${dir}/.git"; \
+      if [ -f "${dir}/requirements.txt" ]; then uv pip install -r "${dir}/requirements.txt"; fi; \
+    done < /family/nodes.txt; \
+    if [ -d /family/patches ]; then cp -rv /family/patches/. /comfyui/custom_nodes/; fi
+# Node requirements must not move torch off the pinned set.
+RUN uv pip install ${TORCH_PINS} --index-url ${PYTORCH_INDEX_URL}
 
-# [CRITICAL FIX] Force-create the directory that ComfyUI Manager crashes on
-RUN mkdir -p /opt/venv/lib/python3.10/site-packages/comfyui_workflow_templates/templates
-RUN touch /opt/venv/lib/python3.10/site-packages/comfyui_workflow_templates/templates/.keep
-    
-# Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./
 RUN chmod +x /start.sh
 
-# Add script to install custom nodes
-COPY scripts/comfy-node-install.sh /usr/local/bin/comfy-node-install
-RUN chmod +x /usr/local/bin/comfy-node-install
-
-# Prevent pip from asking for confirmation during uninstall steps in custom nodes
 ENV PIP_NO_INPUT=1
+ENV WORKER_FAMILY=${FAMILY}
 
-# Copy helper script to switch Manager network mode at container start
-COPY scripts/comfy-manager-set-mode.sh /usr/local/bin/comfy-manager-set-mode
-RUN chmod +x /usr/local/bin/comfy-manager-set-mode
-
-# Debug: print PyTorch CUDA version at build time
 RUN python -c "import torch; print('TORCH VERSION:', torch.__version__); print('TORCH CUDA:', torch.version.cuda)"
 
-# Set the default command to run when starting the container
 CMD ["/start.sh"]
 
-# Stage 2: Download models
-FROM base AS downloader
-
-ARG HUGGINGFACE_ACCESS_TOKEN
-# Set default model type if none is provided
-ARG MODEL_TYPE=flux1-dev-fp8
-
-# Change working directory to ComfyUI
-WORKDIR /runpod-volume/runpod-slim/ComfyUI/
-
-# Stage 3: Final image
 FROM base AS final
 
-# SageAttention — DOWNLOADED, not compiled. Compiling it here took 30+ minutes
-# and blew the RunPod Hub build timeout, so the compile moved to CI: the
-# build-sage-wheel workflow (manual trigger, .github/workflows/) builds the
-# wheel once on the Blacksmith runner for sm_89 + sm_120 + PTX against the same
-# unpinned cu128 torch this image installs, and pins it to the fixed release
-# URL below. Re-run that workflow (then rebuild this image) whenever torch,
-# CUDA family, the arch list, or the SageAttention version changes.
-#
-# This is the stage RunPod builds when no --target is given (last in the file),
-# so this is where the wheel has to land. If you ever build `base` directly, it
-# will NOT have SageAttention.
-#
-# The import check is deliberately non-fatal for the no-GPU build machine case,
-# BUT an "undefined symbol" here means the wheel was built against a different
-# torch than this image just resolved — that wheel will not work at runtime.
-# Fix: re-run build-sage-wheel, then rebuild this image.
+# SageAttention — downloaded, not compiled (compiling blew the 30-min Hub build cap).
+# Built by the build-sage-wheel workflow for sm_89 + sm_120 + PTX against torch
+# 2.11.0+cu128. Re-run that workflow (then rebuild) whenever TORCH_PINS change.
+# An "undefined symbol" at import means the wheel and torch disagree.
 ARG SAGE_WHEEL_URL=https://github.com/Stefanperlarsson/worker-comfyui/releases/download/sage-wheel-v2.2.0/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl
 RUN uv pip install "${SAGE_WHEEL_URL}" \
     && (python -c "import sageattention; print('SAGEATTENTION: import OK')" \
         || echo "SAGEATTENTION: installed, import unverified (no GPU at build time)")
-
-# Copy models from stage 2 to the final image
-# COPY --from=downloader /comfyui/models /comfyui/models

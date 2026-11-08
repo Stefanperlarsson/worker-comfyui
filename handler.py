@@ -554,16 +554,15 @@ def get_video_data(filename, subfolder, video_type):
 # upload subsequently failed.
 # --------------------------------------------------------------------------
 
-COMFY_DIR_CANDIDATES = ("/runpod-volume/runpod-slim/ComfyUI", "/comfyui")
+COMFY_DIR_CANDIDATES = ("/comfyui",)
 KEEP_OUTPUT = os.environ.get("COMFY_KEEP_OUTPUT", "false").lower() == "true"
 
 
 def _comfy_dir(kind):
     """Absolute path to ComfyUI's output/input/temp directory, or None.
 
-    COMFY_BASE_DIR overrides. Otherwise the network-volume install is
-    preferred over the one baked into the image, because that is the one the
-    worker actually runs from -- and the one that runs out of space.
+    COMFY_BASE_DIR overrides. Otherwise the install baked into the image --
+    there is no network volume any more.
     """
     base = os.environ.get("COMFY_BASE_DIR")
     for b in ([base] if base else list(COMFY_DIR_CANDIDATES)):

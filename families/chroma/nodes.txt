@@ -1,0 +1,2 @@
+https://github.com/rgthree/rgthree-comfy 27b4f4cdcf3b127c29d5d8135ac1536ecbd4c383
+https://github.com/cubiq/ComfyUI_essentials 9d9f4bedfc9f0321c19faf71855e228c93bd0dc9

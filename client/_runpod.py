@@ -47,6 +47,7 @@ FAMILIES = {
     "flux": "RUNPOD_ENDPOINT_FLUX",      # Flux.2 Klein 9B ref edits (+ lenovo, snofs)
     "chroma": "RUNPOD_ENDPOINT_CHROMA",  # Chroma HD t2i / img2img / SAM3 inpaint
     "h3": "RUNPOD_ENDPOINT_H3",          # MiniMax H3 PRISM video (LongMedia, r2v)
+    "qwen": "RUNPOD_ENDPOINT_QWEN",      # Qwen-Image-2.1 ref edits (Heretic text encoder)
 }
 
 

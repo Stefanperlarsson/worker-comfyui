@@ -1,6 +1,6 @@
 # worker-comfyui — one Dockerfile, one image per model family.
 #
-#   docker build --build-arg FAMILY=h3 .      (moss | flux | chroma | h3)
+#   docker build --build-arg FAMILY=h3 .      (moss | flux | chroma | h3 | qwen)
 #
 # This builds the family's CODE image: CUDA, Python, a pinned ComfyUI, the family's
 # custom nodes, the handler. No weights. The weights are appended afterwards as
@@ -29,7 +29,7 @@ ENV PIP_PREFER_BINARY=1
 ENV PYTHONUNBUFFERED=1
 ENV CMAKE_BUILD_PARALLEL_LEVEL=8
 
-RUN test -n "${FAMILY}" || (echo "FAMILY build arg is required (moss|flux|chroma|h3)" >&2; exit 1)
+RUN test -n "${FAMILY}" || (echo "FAMILY build arg is required (moss|flux|chroma|h3|qwen)" >&2; exit 1)
 
 RUN apt-get update && apt-get install -y \
     python3.10 \

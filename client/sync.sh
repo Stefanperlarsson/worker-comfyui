@@ -17,6 +17,7 @@ src="$(cd "$(dirname "$0")" && pwd)/_runpod.py"
 TARGETS=(
   /home/stefan/studio/skills/world/generate_image/scripts/_runpod.py
   /home/stefan/studio/skills/world/flux_edit/scripts/_runpod.py
+  /home/stefan/studio/skills/world/qwen_edit/scripts/_runpod.py
   /home/stefan/studio/skills/world/chroma_inpaint/scripts/_runpod.py
   /home/stefan/studio/skills/world/long_video/scripts/_runpod.py
   /home/stefan/hermes_assistant/.hermes/camera-kit/world/send_nsfw_image/scripts/_runpod.py

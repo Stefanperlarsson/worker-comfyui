@@ -16,6 +16,10 @@ name: build-family
 
 on:
   workflow_dispatch:
+    inputs:
+      families:
+        description: 'JSON list of families to build, e.g. ["qwen"]'
+        default: '["moss", "flux", "chroma", "h3", "qwen"]'
   push:
     branches:
       - main
@@ -36,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        family: [moss, flux, chroma, h3]
+        family: ${{ fromJSON(inputs.families || '["moss", "flux", "chroma", "h3", "qwen"]') }}
     steps:
       - name: Free disk space
         run: |
@@ -78,19 +82,24 @@ jobs:
           if [ "$(df --output=avail -B1 /mnt | tail -1)" -gt "$(df --output=avail -B1 / | tail -1)" ]; then
             work=/mnt/models; else work="$RUNNER_TEMP/models"; fi
           sudo mkdir -p "$work" && sudo chown "$USER" "$work"
-          while read -r model; do
+          # models.txt line: <path under models/> [<https url>]. With a url the file
+          # comes from there (Hugging Face); without one, from the old volume's S3.
+          while read -r model url; do
             [ -z "$model" ] && continue
             dest="/comfyui/models/$model"
             if "$tool" has -image "$ref" -dest "$dest"; then
               echo "have $model"; continue
             fi
-            if [ -z "${BUCKET:-}" ]; then
-              echo "::error::$model is missing from $ref and no volume S3 is configured to fetch it from"
-              exit 1
-            fi
             echo "::group::$model"
             local_file="$work/$(basename "$model")"
-            python3 tools/s3get.py "$BUCKET" "runpod-slim/ComfyUI/models/$model" "$local_file"
+            if [ -n "${url:-}" ]; then
+              curl -fL --retry 5 --retry-delay 10 -o "$local_file" "$url"
+            elif [ -z "${BUCKET:-}" ]; then
+              echo "::error::$model is missing from $ref and no volume S3 is configured to fetch it from"
+              exit 1
+            else
+              python3 tools/s3get.py "$BUCKET" "runpod-slim/ComfyUI/models/$model" "$local_file"
+            fi
             ls -la "$local_file"
             "$tool" add -image "$ref" -file "$local_file" -dest "$dest"
             rm -f "$local_file"
@@ -103,7 +112,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        family: [moss, flux, chroma, h3]
+        family: ${{ fromJSON(inputs.families || '["moss", "flux", "chroma", "h3", "qwen"]') }}
     steps:
       - name: Free disk space
         run: |

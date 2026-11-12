@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create or update the four family endpoints on RunPod (REST API v1).
+"""Create or update the family endpoints on RunPod (REST API v1).
 
     RUNPOD_API_KEY=... tools/runpod_endpoints.py <tag-suffix> [family ...]
 
@@ -19,7 +19,7 @@ import requests
 
 API = "https://rest.runpod.io/v1"
 IMAGE = "ghcr.io/stefanperlarsson/worker-comfyui"
-FAMILIES = ("moss", "flux", "chroma", "h3")
+FAMILIES = ("moss", "flux", "chroma", "h3", "qwen")
 
 # 24 GB cards; 4090 (Ada) and 5090 (Blackwell) are both covered by the cu128 torch.
 GPUS = ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 5090"]

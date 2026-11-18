@@ -1,0 +1,3 @@
+diffusion_models/anima-aesthetic-v1.1.safetensors https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/diffusion_models/anima-aesthetic-v1.1.safetensors
+text_encoders/qwen_3_06b_base.safetensors https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/text_encoders/qwen_3_06b_base.safetensors
+vae/qwen_image_vae.safetensors https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/vae/qwen_image_vae.safetensors

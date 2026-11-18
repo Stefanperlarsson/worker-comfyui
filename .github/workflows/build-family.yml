@@ -19,7 +19,7 @@ on:
     inputs:
       families:
         description: 'JSON list of families to build, e.g. ["qwen"]'
-        default: '["moss", "flux", "chroma", "h3", "qwen"]'
+        default: '["moss", "flux", "chroma", "h3", "anima"]'
   push:
     branches:
       - main
@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        family: ${{ fromJSON(inputs.families || '["moss", "flux", "chroma", "h3", "qwen"]') }}
+        family: ${{ fromJSON(inputs.families || '["moss", "flux", "chroma", "h3", "anima"]') }}
     steps:
       - name: Free disk space
         run: |
@@ -112,7 +112,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        family: ${{ fromJSON(inputs.families || '["moss", "flux", "chroma", "h3", "qwen"]') }}
+        family: ${{ fromJSON(inputs.families || '["moss", "flux", "chroma", "h3", "anima"]') }}
     steps:
       - name: Free disk space
         run: |

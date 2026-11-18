@@ -19,7 +19,7 @@ import requests
 
 API = "https://rest.runpod.io/v1"
 IMAGE = "ghcr.io/stefanperlarsson/worker-comfyui"
-FAMILIES = ("moss", "flux", "chroma", "h3", "qwen")
+FAMILIES = ("moss", "flux", "chroma", "h3", "qwen", "anima")
 
 # 24 GB cards; 4090 (Ada) and 5090 (Blackwell) are both covered by the cu128 torch.
 GPUS = ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 5090"]

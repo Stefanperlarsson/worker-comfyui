@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create or update the family endpoints on RunPod (REST API v1).
+"""Create or update the family endpoints on RunPod (GraphQL).
 
     RUNPOD_API_KEY=... tools/runpod_endpoints.py <tag-suffix> [family ...]
 
@@ -17,9 +17,8 @@ import sys
 
 import requests
 
-API = "https://rest.runpod.io/v1"
 IMAGE = "ghcr.io/stefanperlarsson/worker-comfyui"
-FAMILIES = ("moss", "flux", "chroma", "h3", "qwen", "anima")
+FAMILIES = ("moss", "flux", "chroma", "h3", "anima")
 
 # 24 GB cards; 4090 (Ada) and 5090 (Blackwell) are both covered by the cu128 torch.
 GPUS = ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 5090"]
@@ -49,30 +48,30 @@ TEMPLATE_ENV = {
 }
 
 
-def call(method, path, body=None):
-    r = requests.request(method, f"{API}{path}", json=body, timeout=60,
-                         headers={"Authorization": f"Bearer {os.environ['RUNPOD_API_KEY']}"})
-    if r.status_code >= 400:
-        sys.exit(f"{method} {path}: HTTP {r.status_code} {r.text[:500]}")
-    return r.json() if r.text else {}
+def gql(query):
+    """RunPod GraphQL. The REST API host (rest.runpod.io) stopped resolving on
+    2026-11-18 (NXDOMAIN), so everything goes through GraphQL now."""
+    r = requests.post("https://api.runpod.io/graphql", json={"query": query}, timeout=60,
+                      headers={"Authorization": f"Bearer {os.environ['RUNPOD_API_KEY']}"})
+    data = r.json()
+    if r.status_code >= 400 or data.get("errors"):
+        sys.exit(f"graphql: {r.status_code} {json.dumps(data)[:500]}")
+    return data["data"]
 
 
 def set_locations(eid, name, tid, timeout_ms):
     """Pin the endpoint to DATA_CENTERS. REST PATCH accepts dataCenterIds but does not
     apply it (2026-11-08: version bumps, locations stay null), so this goes through
     GraphQL saveEndpoint, which needs the full endpoint input or it resets fields."""
-    q = ('mutation { saveEndpoint(input:{id:"%s", name:"%s", templateId:"%s", '
+    idpart = f'id:"{eid}", ' if eid else ""
+    q = ('mutation { saveEndpoint(input:{%sname:"%s", templateId:"%s", '
          'gpuIds:"ADA_24,ADA_32_PRO", gpuCount:1, workersMin:%d, workersMax:%d, idleTimeout:%d, '
          'scalerType:"%s", scalerValue:%d, networkVolumeId:"", locations:"%s", '
-         'executionTimeoutMs:%d}) { id locations } }') % (
-        eid, name, tid, ENDPOINT["workersMin"], ENDPOINT["workersMax"], ENDPOINT["idleTimeout"],
+         'executionTimeoutMs:%d, flashBootType:FLASHBOOT}) { id locations } }') % (
+        idpart, name, tid, ENDPOINT["workersMin"], ENDPOINT["workersMax"], ENDPOINT["idleTimeout"],
         ENDPOINT["scalerType"], ENDPOINT["scalerValue"], ",".join(DATA_CENTERS), timeout_ms)
-    r = requests.post("https://api.runpod.io/graphql", json={"query": q}, timeout=60,
-                      headers={"Authorization": f"Bearer {os.environ['RUNPOD_API_KEY']}"})
-    data = r.json()
-    if r.status_code >= 400 or data.get("errors"):
-        sys.exit(f"saveEndpoint {name}: {r.status_code} {json.dumps(data)[:500]}")
-    return data["data"]["saveEndpoint"]["locations"]
+    ep = gql(q)["saveEndpoint"]
+    return ep["id"], ep["locations"]
 
 
 def main():
@@ -80,33 +79,21 @@ def main():
         sys.exit(__doc__)
     suffix = sys.argv[1]
     families = sys.argv[2:] or FAMILIES
-    templates = {t["name"]: t for t in call("GET", "/templates")}
-    endpoints = {e["name"]: e for e in call("GET", "/endpoints")}
+    me = gql("{ myself { endpoints { id name } podTemplates { id name isServerless } } }")["myself"]
+    templates = {t["name"]: t for t in me["podTemplates"] if t["isServerless"]}
+    endpoints = {e["name"]: e for e in me["endpoints"]}
     for fam in families:
         name = f"worker-comfyui-{fam}"
-        tpl = {
-            "name": name,
-            "imageName": f"{IMAGE}:{fam}-{suffix}",
-            "isServerless": True,
-            "containerDiskInGb": 20,
-            "volumeInGb": 0,
-            "env": {**TEMPLATE_ENV, "WORKER_FAMILY": fam},
-        }
-        if name in templates:
-            tid = templates[name]["id"]
-            call("PATCH", f"/templates/{tid}", {k: v for k, v in tpl.items() if k != "isServerless"})
-        else:
-            tid = call("POST", "/templates", tpl)["id"]
-        ep = {**ENDPOINT, "name": name, "templateId": tid,
-              "executionTimeoutMs": EXECUTION_TIMEOUT_MS.get(fam, DEFAULT_EXECUTION_TIMEOUT_MS)}
-        if name in endpoints:
-            eid = endpoints[name]["id"]
-            call("PATCH", f"/endpoints/{eid}", ep)
-        else:
-            eid = call("POST", "/endpoints", ep)["id"]
-        locs = set_locations(eid, name, tid, ep["executionTimeoutMs"])
-        print(fam, eid, tpl["imageName"], locs)
-
+        env = {**TEMPLATE_ENV, "WORKER_FAMILY": fam}
+        envs = ", ".join('{key:"%s", value:"%s"}' % kv for kv in env.items())
+        idpart = f'id:"{templates[name]["id"]}", ' if name in templates else ""
+        image = f"{IMAGE}:{fam}-{suffix}"
+        tid = gql('mutation { saveTemplate(input:{%sname:"%s", imageName:"%s", isServerless:true, '
+                  'containerDiskInGb:20, volumeInGb:0, dockerArgs:"", env:[%s]}) { id } }'
+                  % (idpart, name, image, envs))["saveTemplate"]["id"]
+        eid = endpoints[name]["id"] if name in endpoints else None
+        eid, locs = set_locations(eid, name, tid, EXECUTION_TIMEOUT_MS.get(fam, DEFAULT_EXECUTION_TIMEOUT_MS))
+        print(fam, eid, image, locs)
 
 if __name__ == "__main__":
     main()
